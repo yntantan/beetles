@@ -27,13 +27,14 @@ def construct_name(index, pid, addr):
 def download(master_addr, name, manager_addr):
     host, port = master_addr
     logger.info('download name: {}'.format(name))
-    while True:
+    proxy = xmlrpc.client.ServerProxy('http://{}:{}/'.format(host, port), allow_none=True) 
+    while True:          
         try:
-            proxy = xmlrpc.client.ServerProxy('http://{}:{}/'.format(host, port), allow_none=True)
+            retcode = proxy.register_downloader(name, manager_addr)
             break
-        except ConnectionRefusedError as e:
+        except xmlrpc.client.ProtocolError as err:
             time.sleep(settings.CONNECTIONREFUSED_SLEEP)
-    retcode = proxy.register_downloader(name, manager_addr)
+        
     if retcode == settings.EXIST_DOWNLOADER:
         logger.warn('this downloader has been registed') 
     loop = asyncio.get_event_loop()  
