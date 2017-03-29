@@ -1,5 +1,3 @@
-"""A simple web crawler -- class implementing crawling logic."""
-
 import asyncio
 import cgi
 from collections import namedtuple
