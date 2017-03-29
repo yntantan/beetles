@@ -2,19 +2,22 @@ import socketserver
 from xmlrpc.server import SimpleXMLRPCServer
 import helper
 import settings
+from multiprocessing import Queue, Process
+import logging 
 
-tasks = ['http://tech.163.com', 'http://ent.163.com', 'http://news.163.com', 'http://auto.163.com',
+logger = logging.getLogger(__name__)
+
+tasks = ['http://www.10010.com/','http://tech.163.com', 'http://ent.163.com', 'http://news.163.com', 'http://auto.163.com',
              'http://war.163.com', 'http://money.163.com', 'http://fashion.163.com', 'http://jiankang.163.com']
 
 class DispatcherRPCServer(socketserver.ThreadingMixIn, SimpleXMLRPCServer):
     pass
     
 class ManageDownloader:
-    def __init__(self, tasks, server):
-        self.server = server
+    def __init__(self, recv_q, newtasks_q):
         self.downloaders = dict()
-        self.seen_tasks = set(tasks)
-        self.rest_tasks = self.seen_tasks.copy()
+        self.new_q = newtasks_q
+        self.recv_q = recv_q
         self.failed_tasks = dict()
         
     def register_downloader(self, name, manager_addr):
@@ -27,16 +30,28 @@ class ManageDownloader:
             return settings.SUCCESS_REGISTER
     
     def get_tasks(self, name, num):
-        num, ret = self._get_failed_tasks(name, num)        
-        while num > 0 and len(self.rest_tasks) > 0:
-            ret.append(self.rest_tasks.pop())
+        num, ret = self._get_failed_tasks(name, num)     
+        while num > 0 and not self.new_q.empty():
+            ret.append(self.new_q.get())
             num -= 1
         return ret 
         
-    def send_results(results):
-        print('get results')
-        return True
+    def send_results(self, results):
+        logger.info('received {} good results'.format(len(results)))
+        for result in results:
+            recv_q.put_nowait(result)
         
+        
+    def send_failed_results(self, name, results):
+        logger.info('received {} failed results'.format(len(results)))
+        for result in results:
+            if result['url'] in self.failed_tasks:
+                self.failed_tasks[result['url']].add(name)
+            else:
+                tmp = set()
+                tmp.add(result['url'])
+                self.failed_tasks[result['url']] = tmp
+                    
     def _get_failed_tasks(self, name, num):
         ret = []
         for key, val in self.failed_tasks.items():
@@ -47,12 +62,46 @@ class ManageDownloader:
             ret.append(key)
             num -= 1
         return num, ret
+
+
                 
+def deduper(recv_q, new_q):
+    
+    logger.info('in deduper process!')
+    def store(result):
+        pass
         
+    fix_url = lambda addr: addr if ':' in addr \
+                    else 'http://{}'.format(addr)
+                        
+    seen_urls = set(tasks)
+    for url in seen_urls:
+        new_q.put_nowait(url)
+    
+    try:  
+        f = open('link.txt', 'w')  
+        while True:
+            result = recv_q.get()
+            
+            for url in set(result['new_urls']).difference(seen_urls):
+                f.writelines(url)
+                f.writelines('\n')
+                store(result)
+                #if url.lower().find('redirect') == -1:
+                    #new_q.put_nowait(url)
+            seen_urls.update(set(result['new_urls']))
+    finally:
+        f.close()
+    
+           
 if __name__ == '__main__':
-    with DispatcherRPCServer(('localhost', 8000)) as server:
-        server.register_instance(ManageDownloader(tasks, server))
-        print ('serve on localhost:8000')
+    logging.basicConfig(level=logging.INFO, format=settings.FORMAT)
+    with DispatcherRPCServer(('localhost', 8500), allow_none=True) as server:
+        new_q = Queue()
+        recv_q = Queue()
+        server.register_instance(ManageDownloader(recv_q, new_q))
+        Process(target=deduper, args=(recv_q, new_q)).start()
+        print ('serve on localhost:8500')
         server.serve_forever()
     
     

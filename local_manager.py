@@ -14,7 +14,7 @@ import os
 logger = logging.getLogger(__name__)
 
 class LocalManagerRPCServer(socketserver.ThreadingMixIn, SimpleXMLRPCServer):
-    processes = []
+    processes = dict()
     
 
 def construct_name(index, pid, addr):
@@ -29,30 +29,32 @@ def download(master_addr, name, manager_addr):
     logger.info('download name: {}'.format(name))
     while True:
         try:
-            proxy = xmlrpc.client.ServerProxy('http://{}:{}/'.format(host, port))
+            proxy = xmlrpc.client.ServerProxy('http://{}:{}/'.format(host, port), allow_none=True)
             break
         except ConnectionRefusedError as e:
             time.sleep(settings.CONNECTIONREFUSED_SLEEP)
-            
     retcode = proxy.register_downloader(name, manager_addr)
     if retcode == settings.EXIST_DOWNLOADER:
         logger.warn('this downloader has been registed')
     loop = asyncio.get_event_loop()
     cr = crawler.Crawler([], loop=loop)
-    while True:            
-        tasks = proxy.get_tasks(name, settings.MAX_CRAWLER_NUM)
-        if len(tasks) == 0:
-            logger.info('no more tasks!')
-            time.sleep(settings.NO_TASKS_SLEEP)
-            continue
-        cr.add_roots(tasks)
-        try:
+    try:
+        while True:            
+            tasks = proxy.get_tasks(name, settings.MAX_CRAWLER_NUM)
+            if len(tasks) == 0:
+                logger.info('no more tasks!')
+                time.sleep(settings.NO_TASKS_SLEEP)
+                continue
+            cr.add_roots(tasks)
             loop.run_until_complete(cr.crawl())
-        except Exception as e:
-            cr.close()
-            loop.stop()
-            loop.run_forever()
-            loop.close()
+            proxy.send_failed_results(name, cr.fail_done)
+            proxy.send_results(cr.done)
+            cr.clear()  
+    finally:
+        cr.close()
+        loop.stop()
+        loop.run_forever()
+        loop.close()
                 
                 
             
@@ -60,23 +62,19 @@ def download(master_addr, name, manager_addr):
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format=settings.FORMAT)
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host",
-                        help="manager's host",
-                        default="localhost",
-                        action="store")
-    parser.add_argument("--port",
-                        help="manager's port",
-                        action="store")
-    parser.add_argument('--master',
+    parser.add_argument('--port','-p',
+                        help='manager\'s port',
+                        action='store')
+    parser.add_argument('--master','-m',
                         help='master\'s address host:port',
                         action='store')
-    parser.add_argument('--processnum',
+    parser.add_argument('--processnum', '-n',
                         help='process number to crawl',
                         default='1',
                         action='store')
                                             
     args = parser.parse_args()
-    localhost = args.host
+    localhost = 'localhost'
     localport = int(args.port)
     master_host, master_port = args.master.split(':')
     master_port = int(master_port)
@@ -85,12 +83,11 @@ if __name__ == '__main__':
     with LocalManagerRPCServer((localhost, localport)) as manager:
         for i in range(num):
             name = construct_name(i, os.getpid(), (localhost, localport))
-            manager.processes.append(
-                    multiprocessing
-                    .Process(target = download, 
+            manager.processes['name']= multiprocessing \
+                            .Process(target = download, 
                              args = ((master_host, master_port), name, 
-                             (localhost, localport))))
-        for p in manager.processes:
+                             (localhost, localport)))
+        for p in manager.processes.values():
             p.start()
         manager.serve_forever()
     

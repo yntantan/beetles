@@ -2,21 +2,39 @@ import asyncio
 import logging
 import urllib.parse
 import time
+import cgi
+import re
+import urllib.parse
+
 try:
     from asyncio import JoinableQueue as Queue
 except ImportError:
-    from asyncio import Queue    
+    from asyncio import Queue
+
 import aiohttp
-from helper import FetchStatistic
 import settings
 import threading
+
+
 logger = logging.getLogger(__name__)
 
-
+def fetchstatistic(url, status, exception, size, content_type, encoding, body, new_urls):
+    ret = dict()
+    ret['url'] = url
+    ret['status'] = status
+    ret['exception'] = exception
+    ret['size'] = size
+    ret['content_type'] = content_type
+    ret['encoding'] = encoding
+    ret['body'] = body
+    ret['new_urls'] = list(new_urls)
+    return ret
+    
+    
 class Crawler:
     
     def __init__(self, roots, max_tries=1, 
-                    max_tasks=2, q=None,
+                    max_tasks=1, q=None,
                     loop=None):
         self.loop = loop or asyncio.get_event_loop()
         logger.info('init crawler...')
@@ -29,9 +47,14 @@ class Crawler:
         self.fail_done = []
         for root in roots:
             self.q.put_nowait(root)
+            self.seen_urls.add(root)
         self.session = aiohttp.ClientSession(loop=self.loop)
         logger.info('init done! queue size:{}'.format(self.q.qsize()))
-        
+    
+    def clear(self):
+        self.done.clear()
+        self.fail_done.clear()
+            
     def close(self):
         self.session.close()
     
@@ -45,31 +68,50 @@ class Crawler:
         for root in roots:
             self.q.put_nowait(root)  
                       
-    @asyncio.coroutine
-    def parse_links(self, response):
+    async def parse_links(self, response):
         content_type = None
         encoding = None
-        body = yield from response.read()
+        body = await response.read()
+        new_urls = None
         if response.status == 200:
-            content_type = response.headers.get('content_type')
-        
-        stat = FetchStatistic(
+            content_type = response.headers.get('content-type')
+            pdict = {}
+
+            if content_type:
+                content_type, pdict = cgi.parse_header(content_type)
+
+            encoding = pdict.get('charset', 'utf-8')
+            if content_type in ('text/html', 'application/xml'):
+                text = await response.text()
+                
+                urls = set(re.findall(r'''(?i)href=["']([^\s"'<>]+)''',
+                                      text))
+                if urls:
+                    logger.info('got %r distinct urls from %r',
+                                len(urls), response.url)
+                new_urls=set()                
+                for url in urls:
+                    normalized = urllib.parse.urljoin(response.url, url)
+                    defragmented, frag = urllib.parse.urldefrag(normalized)
+                    new_urls.add(defragmented)
+                    self.seen_urls.update(new_urls)
+        stat = fetchstatistic(
             url=response.url,
             status=response.status,
             exception=None,
             size=len(body),
             content_type=content_type,
-            body=body)
-            
+            encoding=encoding,
+            body=body,
+            new_urls=new_urls)   
         return stat  
         
-    @asyncio.coroutine
-    def fetch(self, url):
+    async def fetch(self, url):
         tries = 0
         exception = None
         while tries < self.max_tries:
             try:
-                response = yield from self.session.get(
+                response = await self.session.get(
                     url, allow_redirects=False)
                     
                 if tries > 1:
@@ -82,38 +124,38 @@ class Crawler:
         else:
             logger.error('{} failed after {} tries'.format(
                          url, self.max_tries))
-            self.record_failed_statistic(FetchStatistic(url=url,
+            self.record_failed_statistic(fetchstatistic(url=url,
                                                   status=None,
                                                   exception=exception,
                                                   size=0,
                                                   content_type=None,
-                                                  body=None))
+                                                  encoding=None,
+                                                  body=None,
+                                                  new_urls=None))
             return
         logger.info('parse link {}'.format(response.url))
-        stat = yield from self.parse_links(response)
-        logger.info('url: {} status: {} size: {}'.format(stat.url, stat.status, stat.size))
+        stat = await self.parse_links(response)
+        logger.info('url: {} status: {} size: {}'.format(stat['url'], stat['status'], stat['size']))
         self.record_statistic(stat)
-        yield from response.release()
+        await response.release()
         
-    @asyncio.coroutine
-    def work(self):
+    async def work(self):
         try:
             while True:
-                logger.info('get url from Queue...')
-                url = yield from self.q.get()
-                yield from self.fetch(url)
+                url = await self.q.get()
+                await self.fetch(url)
                 self.q.task_done()
         except asyncio.CancelledError:
             logger.info('received cancel signal!!')
             
-    @asyncio.coroutine
-    def crawl(self):
+
+    async def crawl(self):
         logger.info('init crawl, construct workers')
-        workers = [asyncio.Task(self.work(), loop=self.loop)
+        workers = [self.loop.create_task(self.work())
                     for _ in range(self.max_tasks)]
         self.t0 = time.time()
         logger.info('time: {}'.format(self.t0))
-        yield from self.q.join()
+        await self.q.join()
         self.t1 = time.time()
         for w in workers:
             w.cancel()
@@ -129,8 +171,8 @@ if __name__ == '__main__':
     roots1 = ['http://tech.163.com', 'http://ent.163.com', 'http://news.163.com', 'http://auto.163.com']
     roots2 = ['http://war.163.com', 'http://money.163.com', 'http://fashion.163.com', 'http://jiankang.163.com']
     loop = asyncio.get_event_loop()
-    q = Queue(loop=loop)
-    crawler = Crawler(list(), loop=loop, q=q)
+    q = Queue()
+    crawler = Crawler(roots1, loop=loop, q=q)
     #threading.Thread(target=test, args=(roots2, q)).start()
     try:
         loop.run_until_complete(crawler.crawl())  # Crawler gonna crawl.
