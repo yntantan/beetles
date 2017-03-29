@@ -35,9 +35,8 @@ def download(master_addr, name, manager_addr):
             time.sleep(settings.CONNECTIONREFUSED_SLEEP)
     retcode = proxy.register_downloader(name, manager_addr)
     if retcode == settings.EXIST_DOWNLOADER:
-        logger.warn('this downloader has been registed')
-    loop = asyncio.get_event_loop()
-    cr = crawler.Crawler([], loop=loop)
+        logger.warn('this downloader has been registed') 
+    loop = asyncio.get_event_loop()  
     try:
         while True:            
             tasks = proxy.get_tasks(name, settings.MAX_CRAWLER_NUM)
@@ -45,11 +44,11 @@ def download(master_addr, name, manager_addr):
                 logger.info('no more tasks!')
                 time.sleep(settings.NO_TASKS_SLEEP)
                 continue
-            cr.add_roots(tasks)
+            cr = crawler.Crawler(tasks)
             loop.run_until_complete(cr.crawl())
             proxy.send_failed_results(name, cr.fail_done)
             proxy.send_results(cr.done)
-            cr.clear()  
+            cr.close()
     finally:
         cr.close()
         loop.stop()

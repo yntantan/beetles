@@ -7,8 +7,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-tasks = ['http://www.10010.com/','http://tech.163.com', 'http://ent.163.com', 'http://news.163.com', 'http://auto.163.com',
+tasks = ['http://tech.163.com', 'http://ent.163.com', 'http://news.163.com', 'http://auto.163.com',
              'http://war.163.com', 'http://money.163.com', 'http://fashion.163.com', 'http://jiankang.163.com']
+
+#tasks = ['http://www.10010.com']
 
 class DispatcherRPCServer(socketserver.ThreadingMixIn, SimpleXMLRPCServer):
     pass
@@ -77,19 +79,23 @@ def deduper(recv_q, new_q):
     seen_urls = set(tasks)
     for url in seen_urls:
         new_q.put_nowait(url)
-    
+    loggertimes = 10
+    iternum = 0
     try:  
         f = open('link.txt', 'w')  
         while True:
+            iternum += 1
             result = recv_q.get()
-            
+            result['new_urls'] = set(result['new_urls']) if result['new_urls'] is not None else set()
             for url in set(result['new_urls']).difference(seen_urls):
                 f.writelines(url)
                 f.writelines('\n')
                 store(result)
-                #if url.lower().find('redirect') == -1:
-                    #new_q.put_nowait(url)
+                if result['next_url'] is None:
+                    new_q.put_nowait(url)
             seen_urls.update(set(result['new_urls']))
+            if iternum % loggertimes == 0:
+                logger.info('---------------------------------{}----------------------------'.format(len(seen_urls)))
     finally:
         f.close()
     
