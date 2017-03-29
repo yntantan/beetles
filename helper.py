@@ -6,20 +6,6 @@ import socket
 
 logger = logging.getLogger(__name__)
 
-
-def results(url, status, exception, size, content_type, encoding, body, new_urls):
-    ret = dict()
-    ret['url'] = url
-    ret['status'] = status
-    ret['exception'] = exception
-    ret['size'] = size
-    ret['content_type'] = content_type
-    ret['encoding'] = encoding
-    ret['body'] = body
-    ret['new_urls'] = new_urls
-    return ret
-    
-FetchStatistic = results
                              
                              
 def connect():
