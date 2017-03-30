@@ -5,10 +5,15 @@ import logging
 import re
 import time
 import urllib.parse
+from xmlrpc.client import ServerProxy
+import os
+import settings
+import argparse
+
 
 try:
     # Python 3.4.
-    from asyncio import JoinableQueue as Queue
+    from asyncio import JoinableQueue as Queue 
 except ImportError:
     # Python 3.5.
     from asyncio import Queue
@@ -261,3 +266,34 @@ class Crawler:
         self.t1 = time.time()
         for w in workers:
             w.cancel()
+            
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO, format=settings.FORMAT)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--host',
+                        help='remote host addr: ip:port',
+                        action='store')
+    args = parser.parse_args()
+    ip, port = args.host.split(':')
+    port = int(port)
+    proxy = ServerProxy('http://{}:{}/'.format(ip, port), allow_none=True)
+    loop = asyncio.get_event_loop() 
+    pid = os.getpid()
+    try:
+        while True:            
+            tasks = proxy.get_tasks(pid, settings.MAX_CRAWLER_NUM)
+            if len(tasks) == 0:
+                logger.info('no more tasks!')
+                time.sleep(settings.NO_TASKS_SLEEP)
+                continue
+            cr = Crawler(tasks)
+            loop.run_until_complete(cr.crawl())
+            proxy.send_failed_results(pid, cr.fail_done)
+            proxy.send_results(cr.done)
+            cr.close()
+    finally:
+        cr.close()
+        loop.stop()
+        loop.run_forever()
+        loop.close()
+    

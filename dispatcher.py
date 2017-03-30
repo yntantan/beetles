@@ -1,19 +1,29 @@
 import socketserver
-from xmlrpc.server import SimpleXMLRPCServer
+from xmlrpc.server import SimpleXMLRPCServer, SimpleXMLRPCRequestHandler
 import helper
 import settings
 from multiprocessing import Queue, Process
 import logging 
+import threading 
 
 logger = logging.getLogger(__name__)
 
-tasks = ['http://tech.163.com', 'http://ent.163.com', 'http://news.163.com', 'http://auto.163.com',
-             'http://war.163.com', 'http://money.163.com', 'http://fashion.163.com', 'http://jiankang.163.com']
+localrecord = threading.local()
+#tasks = ['http://tech.163.com', 'http://ent.163.com', 'http://news.163.com', 'http://auto.163.com',
+#             'http://war.163.com', 'http://money.163.com', 'http://fashion.163.com', 'http://jiankang.163.com']
 
-#tasks = ['http://www.10010.com']
+tasks = ['http://www.xidian.edu.cn']
 
+class RequestHandler(SimpleXMLRPCRequestHandler):
+    def __init__(self, request, client_address, server):
+        server.connected_client.add(client_address)
+        localrecord.ip, _ = client_address
+        SimpleXMLRPCRequestHandler.__init__(self, request, client_address, server)
+        
+        
+        
 class DispatcherRPCServer(socketserver.ThreadingMixIn, SimpleXMLRPCServer):
-    pass
+    connected_client = set()
     
 class ManageDownloader:
     def __init__(self, recv_q, newtasks_q):
@@ -22,17 +32,14 @@ class ManageDownloader:
         self.recv_q = recv_q
         self.failed_tasks = dict()
         
-    def register_downloader(self, name, manager_addr):
-        if name in self.downloaders.keys():
-            return settings.EXIST_DOWNLOADER
-        else:
-            tmp = dict()
-            tmp[settings.MANAGER_ADDR] = manager_addr           
-            self.downloaders[name] = tmp
-            return settings.SUCCESS_REGISTER
-    
-    def get_tasks(self, name, num):
-        num, ret = self._get_failed_tasks(name, num)     
+    def _get_flag(self, pid):
+        return "{}:{}".format(localrecord.ip, pid)
+        
+        
+    def get_tasks(self, pid, num):
+        flag = self._get_flag(pid)
+        logger.info('{} request new tasks'.format(flag))
+        num, ret = self._get_failed_tasks(flag, num)     
         while num > 0 and not self.new_q.empty():
             ret.append(self.new_q.get())
             num -= 1
@@ -44,22 +51,23 @@ class ManageDownloader:
             recv_q.put_nowait(result)
         
         
-    def send_failed_results(self, name, results):
+    def send_failed_results(self, pid, results):
+        flag = self._get_flag(pid)
         logger.info('received {} failed results'.format(len(results)))
         for result in results:
             if result['url'] in self.failed_tasks:
-                self.failed_tasks[result['url']].add(name)
+                self.failed_tasks[result['url']].add(flag)
             else:
                 tmp = set()
-                tmp.add(result['url'])
+                tmp.add(flag)
                 self.failed_tasks[result['url']] = tmp
                     
-    def _get_failed_tasks(self, name, num):
+    def _get_failed_tasks(self, flag, num):
         ret = []
         for key, val in self.failed_tasks.items():
             if num == 0:
                 break
-            if name in val:
+            if flag in val:
                 continue
             ret.append(key)
             num -= 1
@@ -102,7 +110,9 @@ def deduper(recv_q, new_q):
            
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format=settings.FORMAT)
-    with DispatcherRPCServer(('localhost', 8500), allow_none=True) as server:
+    with DispatcherRPCServer(('localhost', 8500), requestHandler=RequestHandler,
+                                                  logRequests=False,
+                                                  allow_none=True) as server:
         new_q = Queue()
         recv_q = Queue()
         server.register_instance(ManageDownloader(recv_q, new_q))
