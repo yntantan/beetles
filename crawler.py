@@ -51,7 +51,7 @@ def fetchstatistic(url, next_url, status,
 class Crawler:
     def __init__(self, roots,
                  exclude=None, strict=True,  # What to crawl.
-                 max_redirect=10, max_tries=4,  # Per-url limits.
+                 max_redirect=10, max_tries=1,  # Per-url limits.
                  max_tasks=1, *, loop=None):
         self.loop = loop or asyncio.get_event_loop()
         self.roots = roots
@@ -288,9 +288,13 @@ if __name__ == '__main__':
                 continue
             cr = Crawler(tasks)
             loop.run_until_complete(cr.crawl())
-            proxy.send_failed_results(pid, cr.fail_done)
-            proxy.send_results(cr.done)
+            if len(cr.fail_done) > 0:
+                proxy.send_failed_results(pid, cr.fail_done)
+            time.sleep(2)
+            proxy.send_results(pid, cr.done)
             cr.close()
+            
+            
     finally:
         cr.close()
         loop.stop()

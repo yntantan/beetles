@@ -5,18 +5,18 @@ import settings
 from multiprocessing import Queue, Process
 import logging 
 import threading 
+from timer import Timer
 
 logger = logging.getLogger(__name__)
 
 localrecord = threading.local()
-#tasks = ['http://tech.163.com', 'http://ent.163.com', 'http://news.163.com', 'http://auto.163.com',
-#             'http://war.163.com', 'http://money.163.com', 'http://fashion.163.com', 'http://jiankang.163.com']
+tasks = ['http://tech.163.com', 'http://ent.163.com', 'http://news.163.com', 'http://auto.163.com',
+             'http://war.163.com', 'http://money.163.com', 'http://fashion.163.com', 'http://jiankang.163.com']
 
-tasks = ['http://www.xidian.edu.cn']
+#tasks = ['http://www.xidian.edu.cn']
 
 class RequestHandler(SimpleXMLRPCRequestHandler):
     def __init__(self, request, client_address, server):
-        server.connected_client.add(client_address)
         localrecord.ip, _ = client_address
         SimpleXMLRPCRequestHandler.__init__(self, request, client_address, server)
         
@@ -31,11 +31,11 @@ class ManageDownloader:
         self.new_q = newtasks_q
         self.recv_q = recv_q
         self.failed_tasks = dict()
+        self.timer = Timer(self.new_q)
         
     def _get_flag(self, pid):
         return "{}:{}".format(localrecord.ip, pid)
-        
-        
+            
     def get_tasks(self, pid, num):
         flag = self._get_flag(pid)
         logger.info('{} request new tasks'.format(flag))
@@ -43,10 +43,17 @@ class ManageDownloader:
         while num > 0 and not self.new_q.empty():
             ret.append(self.new_q.get())
             num -= 1
+        #this is for timer
+        #1.record flag and tasks(stored in ret)
+        #2.start Timer
+        #self.timer.add(flag, tasks)
+        self.timer.add(flag, ret)
         return ret 
         
-    def send_results(self, results):
+    def send_results(self, pid, results):
         logger.info('received {} good results'.format(len(results)))
+        flag = self._get_flag(pid)
+        self.timer.remove(flag)
         for result in results:
             recv_q.put_nowait(result)
         
