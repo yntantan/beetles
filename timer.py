@@ -3,6 +3,7 @@ import time
 import logging
 
 logger = logging.getLogger(__name__)
+mutex = threading.Lock()
 
 class Node:
     def __init__(self, time=None, tasks=None,
@@ -99,14 +100,14 @@ class Timer:
     
     
     def remove(self, flag):
-        logger.info('remove flag: {}'.format(flag))
+        logger.info('remove flag: {} current list\'s length is: {}'.format(flag, len(self._blist)))
         if self._blist.peak() is self._map[flag]:
             node = self._blist.pop()
             
             self.thread.cancel()
             if len(self._blist) > 0:
                 interval = self._blist.peak().time + self.timeout - time.time()
-                self.thread = threading.Timer(interval, slef._fix)
+                self.thread = threading.Timer(interval, self._fix)
                 self.thread.start()
             else:
                 self.thread = None

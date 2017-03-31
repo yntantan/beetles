@@ -10,6 +10,7 @@ from timer import Timer
 logger = logging.getLogger(__name__)
 
 localrecord = threading.local()
+
 tasks = ['http://tech.163.com', 'http://ent.163.com', 'http://news.163.com', 'http://auto.163.com',
              'http://war.163.com', 'http://money.163.com', 'http://fashion.163.com', 'http://jiankang.163.com']
 
@@ -51,8 +52,8 @@ class ManageDownloader:
         return ret 
         
     def send_results(self, pid, results):
-        logger.info('received {} good results'.format(len(results)))
         flag = self._get_flag(pid)
+        logger.info('received {} good results from {}'.format(len(results), flag))
         self.timer.remove(flag)
         for result in results:
             recv_q.put_nowait(result)
