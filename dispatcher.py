@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 localrecord = threading.local()
 
 tasks = ['http://tech.163.com', 'http://ent.163.com', 'http://news.163.com', 'http://auto.163.com',
-             'http://war.163.com', 'http://money.163.com', 'http://fashion.163.com', 'http://jiankang.163.com']
+             'http://war.163.com', 'http://money.163.com', 'http://jiankang.163.com']
 
 #tasks = ['http://www.xidian.edu.cn']
 
@@ -39,7 +39,7 @@ class ManageDownloader:
             
     def get_tasks(self, pid, num):
         flag = self._get_flag(pid)
-        logger.info('{} request new tasks'.format(flag))
+        logger.info('request: {}'.format(flag))
         num, ret = self._get_failed_tasks(flag, num)     
         while num > 0 and not self.new_q.empty():
             ret.append(self.new_q.get())
@@ -48,12 +48,16 @@ class ManageDownloader:
         #1.record flag and tasks(stored in ret)
         #2.start Timer
         #self.timer.add(flag, tasks)
+        #there are two main data structures in Timer. And add, remove, fix
+        #add: add a new node to the inside list
+        #remove: remove a new node from the insidee list
+        #全部的操作都需要加锁并且是可
         self.timer.add(flag, ret)
         return ret 
         
     def send_results(self, pid, results):
         flag = self._get_flag(pid)
-        logger.info('received {} good results from {}'.format(len(results), flag))
+        logger.info('receive: {}'.format(flag))
         self.timer.remove(flag)
         for result in results:
             recv_q.put_nowait(result)
@@ -110,8 +114,8 @@ def deduper(recv_q, new_q):
                 if result['next_url'] is None:
                     new_q.put_nowait(url)
             seen_urls.update(set(result['new_urls']))
-            if iternum % loggertimes == 0:
-                logger.info('---------------------------------{}----------------------------'.format(len(seen_urls)))
+            # if iternum % loggertimes == 0:
+            #     logger.info('---------------------------------{}----------------------------'.format(len(seen_urls)))
     finally:
         f.close()
     
