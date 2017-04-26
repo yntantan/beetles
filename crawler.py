@@ -71,6 +71,7 @@ class Crawler:
             host, port = urllib.parse.splitport(parts.netloc)
             if not host:
                 continue
+            #this is for ip addresses
             if re.match(r'\A[\d\.]*\Z', host):
                 self.root_domains.add(host)
             else:
@@ -290,7 +291,7 @@ if __name__ == '__main__':
             loop.run_until_complete(cr.crawl())
             if len(cr.fail_done) > 0:
                 proxy.send_failed_results(pid, cr.fail_done)
-            time.sleep(2)
+            #time.sleep(2)
             proxy.send_results(pid, cr.done)
             cr.close()
             

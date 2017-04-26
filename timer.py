@@ -47,7 +47,7 @@ class BList:
         return self.head.next
                     
     def __str__(self):
-        step = self.head
+        step = self.head.next
         slist = []
         while(step is not None):
             slist.append(str(step.tasks))
@@ -72,10 +72,10 @@ class Timer:
         self.queue = q
         self.thread = None
         self.timeout = timeout
-        self.lock = threading.RLock()
+        self.lock = threading.Lock()
     
     def _fix(self):
-        self.lock.acquire()
+        #self.lock.acquire()
         node = self._blist.pop()
         for task in node.tasks:
             self.queue.put_nowait(task)
@@ -86,25 +86,24 @@ class Timer:
             self.thread.start()
         else:
             self.thread = None
-        self.lock.release()
+        #self.lock.release()
         logger.info('redistribute: {}, list\'s length: {}'.format(node.flag, len(self._blist)))
             
     def add(self, flag, tasks):
-        self.lock.acquire()
+        #self.lock.acquire()
         node = Node(time.time(), tasks, flag)
         self._blist.add(node)
         self._map[flag] = node
         if self.thread is None:
             self.thread = threading.Timer(self.timeout, self._fix)
             self.thread.start()
-        else:
-            self._blist.add(node)
-        self.lock.release()
+        #self.lock.release()
         logger.info('add: {}, list\'s length: {}'.format(flag, len(self._blist)))
+        logger.info(self._blist)
     
     
     def remove(self, flag):
-        self.lock.acquire()
+        #self.lock.acquire()
         if self._blist.peak() is self._map[flag]:
             node = self._blist.pop()            
             self.thread.cancel()
@@ -116,8 +115,9 @@ class Timer:
                 self.thread = None
         else:
             self._blist.remove(self._map[flag])
-        self.lock.release()
-        logger.info('remove: {}'.format(flag))
+        #self.lock.release()
+        logger.info('remove: {}, list\'s length: {}'.format(flag, len(self._blist)))
+        logger.info(self._blist)
     
     
     
