@@ -1,7 +1,7 @@
 import threading
 import time
 import logging
-
+import settings
 logger = logging.getLogger(__name__)
 
 class Node:
@@ -66,7 +66,7 @@ class Timer:
     1. give a ip:pid, store the key and tasks
     2. add node with current_time to list 
     '''
-    def __init__(self, q, timeout=5):
+    def __init__(self, q, timeout=settings.TIME_OUT):
         self._blist = BList()
         self._map = dict()
         self.queue = q
@@ -98,8 +98,8 @@ class Timer:
             self.thread = threading.Timer(self.timeout, self._fix)
             self.thread.start()
         #self.lock.release()
-        logger.info('add: {}, list\'s length: {}'.format(flag, len(self._blist)))
-        logger.info(self._blist)
+        #logger.info('add: {}, list\'s length: {}'.format(flag, len(self._blist)))
+        #logger.info(self._blist)
     
     
     def remove(self, flag):
@@ -116,8 +116,8 @@ class Timer:
         else:
             self._blist.remove(self._map[flag])
         #self.lock.release()
-        logger.info('remove: {}, list\'s length: {}'.format(flag, len(self._blist)))
-        logger.info(self._blist)
+        #logger.info('remove: {}, list\'s length: {}'.format(flag, len(self._blist)))
+        #logger.info(self._blist)
     
     
     

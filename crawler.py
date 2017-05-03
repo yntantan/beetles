@@ -9,7 +9,7 @@ from xmlrpc.client import ServerProxy
 import os
 import settings
 import argparse
-
+import pickle
 
 try:
     # Python 3.4.
@@ -44,7 +44,10 @@ def fetchstatistic(url, next_url, status,
     ret['content_type'] = content_type
     ret['encoding'] = encoding
     ret['new_urls'] = list(new_urls)
-    ret['body'] = body
+    if body is not None:
+        ret['body'] = pickle.dumps(body)
+    else:
+        ret['body'] = None
     return ret
 
 
@@ -119,7 +122,7 @@ class Crawler:
         content_type = None
         encoding = None
         body = yield from response.read()
-
+        text = None
         if response.status == 200:
             content_type = response.headers.get('content-type')
             pdict = {}
@@ -132,16 +135,19 @@ class Crawler:
                 text = yield from response.text()
 
                 # Replace href with (?:href|src) to follow image links.
-                urls = set(re.findall(r'''(?i)href=["']([^\s"'<>]+)''',
+                # urls = set(re.findall(r'''(?i)href=["']([^\s"'<>]+)''',
+                #                       text))
+                urls = set(re.findall(r'''http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+''',
                                       text))
-                if urls:
-                    logger.info('got %r distinct urls from %r',
-                                len(urls), response.url)
+                
                 for url in urls:
                     normalized = urllib.parse.urljoin(response.url, url)
                     defragmented, frag = urllib.parse.urldefrag(normalized)
                     if self.url_allowed(defragmented):
                         links.add(defragmented)
+                # if urls:
+                #     logger.info('got %r distinct urls from %r',
+                #                 len(links), response.url)
 
         stat = fetchstatistic(
             url=response.url,
@@ -152,7 +158,7 @@ class Crawler:
             content_type=content_type,
             encoding=encoding,
             new_urls=links,
-            body=body)
+            body=text)
 
         return stat, links
 
@@ -280,24 +286,28 @@ if __name__ == '__main__':
     proxy = ServerProxy('http://{}:{}/'.format(ip, port), allow_none=True)
     loop = asyncio.get_event_loop() 
     pid = os.getpid()
+    cr = None
     try:
         while True:            
-            tasks = proxy.get_tasks(pid, settings.MAX_CRAWLER_NUM)
+            tasks = proxy.get_tasks(pid, settings.CRAWLER_NUM)
             if len(tasks) == 0:
                 logger.info('no more tasks!')
                 time.sleep(settings.NO_TASKS_SLEEP)
                 continue
+            logger.info("{} tasks!".format(len(tasks)))
             cr = Crawler(tasks)
             loop.run_until_complete(cr.crawl())
-            if len(cr.fail_done) > 0:
-                proxy.send_failed_results(pid, cr.fail_done)
-            #time.sleep(2)
+            # if len(cr.fail_done) > 0:
+            #     proxy.send_failed_results(pid, cr.fail_done)
+            # time.sleep(2)
+            logger.info("{} tasks done!".format(len(tasks)))
             proxy.send_results(pid, cr.done)
             cr.close()
             
             
     finally:
-        cr.close()
+        if cr is not None:
+            cr.close()
         loop.stop()
         loop.run_forever()
         loop.close()
