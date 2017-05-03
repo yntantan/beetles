@@ -1,7 +1,7 @@
 import threading
 import time
 import logging
-
+import settings
 logger = logging.getLogger(__name__)
 
 class Node:
@@ -47,7 +47,7 @@ class BList:
         return self.head.next
                     
     def __str__(self):
-        step = self.head
+        step = self.head.next
         slist = []
         while(step is not None):
             slist.append(str(step.tasks))
@@ -66,52 +66,58 @@ class Timer:
     1. give a ip:pid, store the key and tasks
     2. add node with current_time to list 
     '''
-    def __init__(self, q, timeout=5):
+    def __init__(self, q, timeout=settings.TIME_OUT):
         self._blist = BList()
         self._map = dict()
         self.queue = q
         self.thread = None
         self.timeout = timeout
+        self.lock = threading.Lock()
     
     def _fix(self):
+        #self.lock.acquire()
         node = self._blist.pop()
         for task in node.tasks:
             self.queue.put_nowait(task)
-        del self._map[node.flag]
-        logger.error('{} error!! but task redistributed to queue'.format(node.flag))
+        #del self._map[node.flag]
         if len(self._blist) > 0:
             interval = self._blist.peak().time - node.time
             self.thread = threading.Timer(interval, self._fix)
             self.thread.start()
         else:
             self.thread = None
+        #self.lock.release()
+        logger.info('redistribute: {}, list\'s length: {}'.format(node.flag, len(self._blist)))
             
     def add(self, flag, tasks):
-        logger.info('add {} tasks: {}'.format(flag, tasks))
+        #self.lock.acquire()
         node = Node(time.time(), tasks, flag)
         self._blist.add(node)
         self._map[flag] = node
         if self.thread is None:
             self.thread = threading.Timer(self.timeout, self._fix)
             self.thread.start()
-        else:
-            self._blist.add(node)
+        #self.lock.release()
+        #logger.info('add: {}, list\'s length: {}'.format(flag, len(self._blist)))
+        #logger.info(self._blist)
     
     
     def remove(self, flag):
-        logger.info('remove flag: {}'.format(flag))
+        #self.lock.acquire()
         if self._blist.peak() is self._map[flag]:
-            node = self._blist.pop()
-            
+            node = self._blist.pop()            
             self.thread.cancel()
             if len(self._blist) > 0:
                 interval = self._blist.peak().time + self.timeout - time.time()
-                self.thread = threading.Timer(interval, slef._fix)
+                self.thread = threading.Timer(interval, self._fix)
                 self.thread.start()
             else:
                 self.thread = None
         else:
             self._blist.remove(self._map[flag])
+        #self.lock.release()
+        #logger.info('remove: {}, list\'s length: {}'.format(flag, len(self._blist)))
+        #logger.info(self._blist)
     
     
     
@@ -121,6 +127,7 @@ if __name__=='__main__':
     node3 = Node(3)
     bl = BList()
     bl.add(node)
+    print(len(bl))
     bl.add(node2)
     print(bl)
     bl.add(node3)
