@@ -1,6 +1,5 @@
 import asyncio
 import cgi
-from collections import namedtuple
 import logging
 import re
 import time
@@ -10,6 +9,9 @@ import os
 import settings
 import argparse
 import pickle
+import aiohttp
+import hashlib
+from bs4 import BeautifulSoup
 
 try:
     # Python 3.4.
@@ -17,8 +19,6 @@ try:
 except ImportError:
     # Python 3.5.
     from asyncio import Queue
-
-import aiohttp  # Install with "pip install aiohttp".
 
 logger = logging.getLogger(__name__)
 
@@ -51,15 +51,15 @@ def fetchstatistic(url, next_url, status,
     return ret
 
 
+#
 class Crawler:
     def __init__(self, roots,
-                 exclude=None, strict=True,  # What to crawl.
+                 exclude=None,  session=None,# What to crawl.
                  max_redirect=10, max_tries=1,  # Per-url limits.
-                 max_tasks=1, *, loop=None):
+                 max_tasks=50, loop=None):
         self.loop = loop or asyncio.get_event_loop()
         self.roots = roots
         self.exclude = exclude
-        self.strict = strict
         self.max_redirect = max_redirect
         self.max_tries = max_tries
         self.max_tasks = max_tasks
@@ -67,7 +67,7 @@ class Crawler:
         self.seen_urls = set()
         self.done = []
         self.fail_done=[]
-        self.session = aiohttp.ClientSession(loop=self.loop)
+        self.session = session or aiohttp.ClientSession(loop=self.loop)
         self.root_domains = set()
         for root in roots:
             parts = urllib.parse.urlparse(root)
@@ -79,10 +79,7 @@ class Crawler:
                 self.root_domains.add(host)
             else:
                 host = host.lower()
-                if self.strict:
-                    self.root_domains.add(host)
-                else:
-                    self.root_domains.add(lenient_host(host))
+                self.root_domains.add(host)
         for root in roots:
             self.add_url(root)
         self.t0 = time.time()
@@ -98,18 +95,19 @@ class Crawler:
             return True
         if re.match(r'\A[\d\.]*\Z', host):
             return False
-        if self.strict:
-            return self._host_okay_strictish(host)
-        else:
-            return self._host_okay_lenient(host)
-
+        return self._host_okay_strictish(host)
+        
     def _host_okay_strictish(self, host):
         host = host[4:] if host.startswith('www.') else 'www.' + host
         return host in self.root_domains
-
-    def _host_okay_lenient(self, host):
-        return lenient_host(host) in self.root_domains
-
+    
+    def _parse_allow(self, url):
+        typ = ('png', 'gif', 'jpg', 'css', 'js')
+        for t in typ:
+            if url.endswith(t):
+                return False
+        return True       
+            
     def record_statistic(self, fetch_statistic):
         self.done.append(fetch_statistic)
     
@@ -133,21 +131,27 @@ class Crawler:
             encoding = pdict.get('charset', 'utf-8')
             if content_type in ('text/html', 'application/xml'):
                 text = yield from response.text()
-
+                sp = BeautifulSoup(text)
                 # Replace href with (?:href|src) to follow image links.
                 # urls = set(re.findall(r'''(?i)href=["']([^\s"'<>]+)''',
                 #                       text))
-                urls = set(re.findall(r'''http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+''',
-                                      text))
-                
+                # urls = set(re.findall(r'''http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+''',
+                #                       text))
+                urls = []
+                for link in sp.find_all('a'):
+                    try:
+                        urls.append(link.get('href'))
+                    except Exception:
+                        continue
                 for url in urls:
                     normalized = urllib.parse.urljoin(response.url, url)
                     defragmented, frag = urllib.parse.urldefrag(normalized)
                     if self.url_allowed(defragmented):
                         links.add(defragmented)
-                # if urls:
-                #     logger.info('got %r distinct urls from %r',
-                #                 len(links), response.url)
+                tmpset = sp.find_all(id='wz_zw')
+                if len(tmpset) > 0:
+                    logger.info('news: {}'.format(response.url))
+                    text = tmpset[0].get_text()
 
         stat = fetchstatistic(
             url=response.url,
@@ -162,7 +166,8 @@ class Crawler:
 
         return stat, links
 
-    @asyncio.coroutine
+
+    @asyncio.coroutine 
     def fetch(self, url, max_redirect):
         """Fetch one URL."""
         tries = 0
@@ -198,23 +203,17 @@ class Crawler:
 
         try:
             if is_redirect(response):
-                logger.info('redirect')
                 location = response.headers['location']
                 next_url = urllib.parse.urljoin(url, location)
-                logger.info('next_url {}'.format(next_url))
-                try:
-                    self.record_statistic(fetchstatistic(url=url,
-                                                         next_url=next_url,
-                                                         status=response.status,
-                                                         exception=None,
-                                                         size=0,
-                                                         content_type=None,
-                                                         encoding=None,
-                                                         new_urls=set(),
-                                                         body=None))
-                except Exception as e:
-                    logger.info(str(e))
-                logger.info('record_statistic done!')
+                self.record_statistic(fetchstatistic(url=url,
+                                                     next_url=next_url,
+                                                     status=response.status,
+                                                     exception=None,
+                                                     size=0,
+                                                     content_type=None,
+                                                     encoding=None,
+                                                     new_urls=set(),
+                                                     body=None))
                 if next_url in self.seen_urls:
                     return
                 if max_redirect > 0:
@@ -230,13 +229,13 @@ class Crawler:
         finally:
             yield from response.release()
 
-    @asyncio.coroutine
+   
+    @asyncio.coroutine 
     def work(self):
         """Process queue items forever."""
         try:
             while True:
                 url, max_redirect = yield from self.q.get()
-                assert url in self.seen_urls
                 yield from self.fetch(url, max_redirect)
                 self.q.task_done()
         except asyncio.CancelledError:
@@ -263,6 +262,7 @@ class Crawler:
         self.seen_urls.add(url)
         self.q.put_nowait((url, max_redirect))
 
+    
     @asyncio.coroutine
     def crawl(self):
         """Run the crawler until all finished."""
@@ -273,6 +273,7 @@ class Crawler:
         self.t1 = time.time()
         for w in workers:
             w.cancel()
+
             
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format=settings.FORMAT)
@@ -288,22 +289,32 @@ if __name__ == '__main__':
     pid = os.getpid()
     cr = None
     try:
-        while True:            
-            tasks = proxy.get_tasks(pid, settings.CRAWLER_NUM)
+        while True: 
+            try:           
+                tasks = proxy.get_tasks(pid, settings.CRAWLER_NUM)
+            except OSError as e:
+                logger.info('cannot connect to master')
+                time.sleep(settings.CONNECTIONREFUSED_SLEEP)
+                continue
             if len(tasks) == 0:
                 logger.info('no more tasks!')
                 time.sleep(settings.NO_TASKS_SLEEP)
                 continue
-            logger.info("{} tasks!".format(len(tasks)))
+            logger.info('recv: {} tasks'.format(len(tasks)))
             cr = Crawler(tasks)
             loop.run_until_complete(cr.crawl())
             # if len(cr.fail_done) > 0:
             #     proxy.send_failed_results(pid, cr.fail_done)
             # time.sleep(2)
             logger.info("{} tasks done!".format(len(tasks)))
-            proxy.send_results(pid, cr.done)
+            try:
+                proxy.send_results(pid, cr.done)
+            except OSError as e:
+                logger.warn(str(e))
+            except Exception as e:
+                logger.warn(str(e))
+            logger.info('sent done')
             cr.close()
-            
             
     finally:
         if cr is not None:

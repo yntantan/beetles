@@ -5,7 +5,7 @@ FORMAT = '%(asctime)-15s %(name)s module:%(module)s, %(message)s'
 #spider_runner   
 
 #
-CRAWLER_NUM = 5
+CRAWLER_NUM = 50
 #
 NO_TASKS_SLEEP = 5
 
@@ -16,7 +16,17 @@ SUCCESS_REGISTER = 2
 
 TIME_OUT = 60
 
-FILE_LINK = "/Volumes/Elements/html/link.txt"
+#FILE_LINK = "link.txt"
 
-FILE_DATA = "/Volumes/Elements/html/data"
+#FILE_DATA = "data"
+
+FILE_LINK = "/Volumes/Elements/beetles/link.txt"
+
+FILE_DATA = "/Volumes/Elements/beetles/data"
+
+FILE_STORE_DB = '/Volumes/Elements/beetles/db.txt'
+
+FILE_STORE_MONGO = '/Volumes/Elements/beetles/mongo.txt'
+
+
 

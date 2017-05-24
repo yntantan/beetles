@@ -17,6 +17,7 @@ class DBDB(object):
 
     def commit(self):
         self._assert_not_closed()
+        print('dbdb commit')
         self._tree.commit()
 
     def __getitem__(self, key):
