@@ -1,5 +1,6 @@
 import socketserver
 from xmlrpc.server import SimpleXMLRPCServer, SimpleXMLRPCRequestHandler
+import xmlrpc
 import helper
 import settings
 from multiprocessing import Queue, Process
@@ -8,6 +9,7 @@ import threading
 from timer import Timer
 import dbdb
 import pickle
+import time
 logger = logging.getLogger(__name__)
 
 localrecord = threading.local()
@@ -15,8 +17,8 @@ localrecord = threading.local()
 #tasks = ['http://tech.163.com', 'http://ent.163.com', 'http://news.163.com', 'http://auto.163.com',
 #            'http://war.163.com', 'http://money.163.com', 'http://jiankang.163.com']
 
-#tasks = ['http://www.xidian.edu.cn']
-tasks = ['http://tech.163.com']
+tasks = ['http://news.xidian.edu.cn']
+#tasks = ['http://rs.xidian.edu.cn/forum.php']
 
 
 class RequestHandler(SimpleXMLRPCRequestHandler):
@@ -42,35 +44,29 @@ class ManageDownloader:
             
     def get_tasks(self, pid, num):
         flag = self._get_flag(pid)
-        logger.info(''.format(flag))
+        logger.info('request: {}'.format(flag))
         ret = []
         #num, ret = self._get_failed_tasks(flag, num)     
         while num > 0 and not self.new_q.empty():
             ret.append(self.new_q.get())
             num -= 1
-        #this is for timer
-        #1.record flag and tasks(stored in ret)
-        #2.start Timer
-        #self.timer.add(flag, tasks)
-        #there are two main data structures in Timer. And add, remove, fix
-        #add: add a new node to the inside list
-        #remove: remove a new node from the insidee list
-        #全部的操作都需要加锁并且是可
-        self.timer.add(flag, ret)
-        logger.info("distribute {} tasks to {}".format(len(ret), flag))
+
+        if len(ret) > 0:
+            self.timer.add(flag, ret)
         return ret 
         
     def send_results(self, pid, results):
         flag = self._get_flag(pid)
-        logger.info('receive {} results from {}'.format(len(results), flag))
-        self.timer.remove(flag)
-        for result in results:
-            recv_q.put_nowait(result)
+        logger.info('recv: {}'.format(flag))
+        if not self.timer.is_fixed(flag):
+            self.timer.remove(flag)
+            for result in results:
+                recv_q.put_nowait(result)
         
         
     def send_failed_results(self, pid, results):
         flag = self._get_flag(pid)
-        logger.info('received {} failed results'.format(len(results)))
+        #logger.info('received {} failed results'.format(len(results)))
         for result in results:
             if result['url'] in self.failed_tasks:
                 self.failed_tasks[result['url']].add(flag)
@@ -95,14 +91,17 @@ class ManageDownloader:
 def deduper(recv_q, new_q):
     
     logger.info('in deduper process!')
-    def store(result, db):
-        if result['body'] is not None:
-            f.writelines(result['url'])
-            f.writelines('\n')
-            text = pickle.loads(result['body'].data)
-            db[result['url']] = text
-            db.commit()   
-            logger.info("store {}:{} to database done!".format(iternum, result['url']))
+    def store(result, db, f):
+        f.writelines(result['url'])
+        f.writelines('\n')
+        text = pickle.loads(result['body'].data)
+        db[result['url']] = text
+        db.commit()
+        f.flush()
+            
+    def store_mongo(result, db):
+        text = pickle.loads(result['body'].data)
+        db.insert_one({'url':result['url'], 'news':text})
                         
     seen_urls = set(tasks)
     for url in seen_urls:
@@ -110,17 +109,26 @@ def deduper(recv_q, new_q):
     loggertimes = 10
     iternum = 0
     db = dbdb.connect(settings.FILE_DATA)
-    try:  
-        f = open(settings.FILE_LINK, 'w')  
+    linkf = open(settings.FILE_LINK, 'w')
+    # from pymongo import MongoClient
+    # client = MongoClient()
+    # db = client.results
+    # rea = db.news 
+    f = open(settings.FILE_STORE_DB, 'w')
+    try:   
+        logger.info(settings.FILE_LINK)
         while True:
-            iternum += 1
             result = recv_q.get()
-            try:
-                store(result, db)
-            except Exception as e:
-                logger.info(':'.join(["store error", result['url'], str(result.keys())]))
-                # logger.info("stored {}, finished queue length {}, new tasks queue length {}"
-                #             .format(result['url'], recv_q.qsize(), new_q.qsize()))
+            iternum += 1
+            #store(result, db, f)
+            if result['body'] is not None:
+                start = time.time()
+                # store_mongo(result, rea)
+                store(result, db, linkf)
+                end = time.time()
+                f.write(str(end-start))
+                f.write('\n')
+                f.flush()
             if result['next_url'] is None:
                 result['new_urls'] = set(result['new_urls']) if result['new_urls'] is not None else set()
                 for url in set(result['new_urls']).difference(seen_urls):

@@ -21,6 +21,7 @@ class BinaryNode(object):
             length=length,
         )
 
+# left_ref is ref
     def __init__(self, left_ref, key, value_ref, right_ref, length):
         self.left_ref = left_ref
         self.key = key
@@ -33,7 +34,8 @@ class BinaryNode(object):
         self.left_ref.store(storage)
         self.right_ref.store(storage)
 
-
+# reference and address
+#BinaryNodeRef store BinaryNode
 class BinaryNodeRef(ValueRef):
     def prepare_to_store(self, storage):
         if self._referent:
@@ -73,9 +75,10 @@ class BinaryNodeRef(ValueRef):
 class BinaryTree(LogicalBase):
     node_ref_class = BinaryNodeRef
 
-    def _get(self, node, key):
+    def _get(self, node, key):3c
         while node is not None:
             if key < node.key:
+                # read data from ref'addr
                 node = self._follow(node.left_ref)
             elif node.key < key:
                 node = self._follow(node.right_ref)
@@ -83,7 +86,7 @@ class BinaryTree(LogicalBase):
                 return self._follow(node.value_ref)
         raise KeyError
 
-    def _insert(self, node, key, value_ref):
+    def _insert(self, node, key, value_ref):       
         if node is None:
             new_node = BinaryNode(
                 self.node_ref_class(), key, value_ref, self.node_ref_class(), 1)
@@ -140,3 +143,5 @@ class BinaryTree(LogicalBase):
             if next_node is None:
                 return node
             node = next_node
+            
+

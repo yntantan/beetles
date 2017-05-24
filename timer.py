@@ -27,6 +27,8 @@ class BList:
         self.size += 1
             
     def remove(self, node):
+        if node.next is None and node.pre is None:
+            raise RuntimeError('repeat delete the same elements')
         if node is self.tail:
             self.tail = node.pre
             node.pre = None
@@ -34,6 +36,8 @@ class BList:
         else:
             node.pre.next = node.next
             node.next.pre = node.pre
+        node.next = None
+        node.pre = None
         self.size -= 1
     
     def pop(self):
@@ -79,7 +83,9 @@ class Timer:
         node = self._blist.pop()
         for task in node.tasks:
             self.queue.put_nowait(task)
-        #del self._map[node.flag]
+        if self.thread:
+            self.thread.cancel()
+        del self._map[node.flag]
         if len(self._blist) > 0:
             interval = self._blist.peak().time - node.time
             self.thread = threading.Timer(interval, self._fix)
@@ -115,16 +121,22 @@ class Timer:
                 self.thread = None
         else:
             self._blist.remove(self._map[flag])
+        del self._map[flag]
         #self.lock.release()
         #logger.info('remove: {}, list\'s length: {}'.format(flag, len(self._blist)))
         #logger.info(self._blist)
+    def is_fixed(self, flag):
+        if flag in self._map:
+            return False
+        else :
+            return True
     
     
     
 if __name__=='__main__':
-    node = Node(1)
-    node2 = Node(2)
-    node3 = Node(3)
+    node = Node(tasks = 1)
+    node2 = Node(tasks = 2)
+    node3 = Node(tasks = 3)
     bl = BList()
     bl.add(node)
     print(len(bl))
@@ -133,12 +145,13 @@ if __name__=='__main__':
     bl.add(node3)
     print(bl)
     bl.remove(node)
-    print(bl)
-    bl.add(node)
-    print(bl)
-    a = dict()
-    a[node]= 'hello'
-    print(a)
+    print(len(bl))
+    bl.remove(node)
+    print(len(bl))
+    bl.remove(node)
+    print(len(bl))
+    bl.remove(node)
+    print(len(bl))
     
     
     

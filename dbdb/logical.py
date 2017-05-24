@@ -24,9 +24,10 @@ class ValueRef(object):
         return self._referent
 
     def store(self, storage):
+        # add
         if self._referent is not None and not self._address:
             self.prepare_to_store(storage)
-            self._address = storage.write(self.referent_to_string(self._referent))
+            self._address = storage.write(self.referent_to_string(self._referent))   
 
 
 class LogicalBase(object):
@@ -38,6 +39,7 @@ class LogicalBase(object):
         self._refresh_tree_ref()
 
     def commit(self):
+        print('logical commit')
         self._tree_ref.store(self._storage)
         self._storage.commit_root_address(self._tree_ref.address)
 
